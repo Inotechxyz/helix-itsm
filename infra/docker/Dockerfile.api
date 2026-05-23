@@ -10,25 +10,21 @@ RUN apk add --no-cache openssl
 COPY package*.json ./
 COPY apps/api/package*.json ./apps/api/
 COPY packages/shared/package*.json ./packages/shared/
-COPY packages/protected-license/package*.json ./packages/protected-license/
 COPY packages/config/package*.json ./packages/config/
 COPY packages/shared/tsconfig.json ./packages/shared/
-COPY packages/protected-license/tsconfig.json ./packages/protected-license/
 COPY packages/config/tsconfig.base.json ./packages/config/
 
-# Install all workspace dependencies
+# Install all workspace dependencies (includes @inotechxyz/protected-license from npm)
 RUN npm ci
 
 # Copy source code
 COPY apps/api ./apps/api
 COPY packages/shared ./packages/shared
-COPY packages/protected-license ./packages/protected-license
 COPY packages/config ./packages/config
 COPY prisma ./prisma
 
 # Build shared packages first (required for API build)
 RUN npm run build -w packages/shared
-RUN npm run build -w packages/protected-license
 
 # Generate Prisma client
 RUN npx prisma generate
@@ -54,7 +50,6 @@ COPY --from=builder /app/apps/api/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared/dist ./node_modules/@helix/shared
-COPY --from=builder /app/packages/protected-license/dist ./node_modules/@inotechxyz/protected-license
 
 # Set ownership
 RUN chown -R nodejs:nodejs /app

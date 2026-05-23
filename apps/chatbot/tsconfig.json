@@ -10,14 +10,12 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@/*": ["./*"],
-      "@helix/shared": ["../../packages/shared/src"],
-      "@inotechxyz/protected-license": ["../../packages/protected-license/src"]
+      "@helix/shared": ["../../packages/shared/src"]
     }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"],
   "references": [
-    { "path": "../../packages/shared" },
-    { "path": "../../packages/protected-license" }
+    { "path": "../../packages/shared" }
   ]
 }

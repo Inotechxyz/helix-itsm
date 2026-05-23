@@ -50,7 +50,6 @@ The shared packages must be built before the applications can compile:
 ```bash
 # Build shared packages first (required)
 npm run build --workspace=packages/shared
-npm run build --workspace=packages/protected-license
 ```
 
 ### Initialize Database
@@ -213,10 +212,11 @@ helix-helpdesk/
 │   └── worker/           # Background job processor
 ├── packages/
 │   ├── shared/           # Shared types, enums, and utilities (@helix/shared)
-│   ├── config/           # Shared TypeScript and ESLint configurations
+│   └── config/           # Shared TypeScript and ESLint configurations
 ├── prisma/               # Database schema and seed script
 └── infra/                # Docker configs
 ```
+
 
 ## License Tiers
 
