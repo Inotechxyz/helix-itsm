@@ -4,8 +4,7 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "!packages/protected-license"
+    "packages/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
@@ -47,5 +46,8 @@
     "diff": ">=5.2.2",
     "ws": ">=8.20.1",
     "ip-address": ">=10.1.1"
+  },
+  "dependencies": {
+    "@inotechxyz/protected-license": "^1.0.4"
   }
 }
