@@ -1,0 +1,171 @@
+version: '3.8'
+
+# POC Single-Server Deployment
+# All-in-one with embedded databases for minimum cost
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: helix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: helix
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: helix
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U helix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: helix-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Server
+  api:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: helix-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://helix:${POSTGRES_PASSWORD:-changeme}@postgres:5432/helix
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-changeme-jwt-secret}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-changeme-refresh-secret}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
+      # License settings
+      LICENSE_SECRET: ${LICENSE_SECRET:-changeme-license-secret}
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}
+      # Azure AD (optional)
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_CLIENT_ID}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID}
+      # SMTP (optional)
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:-noreply@helix.local}
+      # Storage
+      STORAGE_TYPE: ${STORAGE_TYPE:-local}
+      STORAGE_LOCAL_PATH: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - helix-network
+
+  # Chatbot Service
+  chatbot:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.chatbot
+    container_name: helix-chatbot
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://helix:${POSTGRES_PASSWORD:-changeme}@postgres:5432/helix
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-changeme-jwt-secret}
+      # License settings
+      LICENSE_SECRET: ${LICENSE_SECRET:-changeme-license-secret}
+      LICENSE_PUBLIC_KEY: ${LICENSE_PUBLIC_KEY}
+    networks:
+      - helix-network
+
+  # Web Frontend (served by Nginx)
+  web:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.web
+    container_name: helix-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    networks:
+      - helix-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: helix-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+      - chatbot
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.poc.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot_data:/etc/letsencrypt:ro
+    networks:
+      - helix-network
+
+  # Worker (optional - for email polling)
+  worker:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.worker
+    container_name: helix-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://helix:${POSTGRES_PASSWORD:-changeme}@postgres:5432/helix
+      REDIS_URL: redis://redis:6379
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM:-noreply@helix.local}
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - helix-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+  certbot_data:
+
+networks:
+  helix-network:
+    driver: bridge

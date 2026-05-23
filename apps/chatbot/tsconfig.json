@@ -1,0 +1,23 @@
+{
+  "extends": "@helix/config/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": "./src",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@helix/shared": ["../../packages/shared/src"],
+      "@inotechxyz/protected-license": ["../../packages/protected-license/src"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/protected-license" }
+  ]
+}

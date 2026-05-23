@@ -1,0 +1,1838 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Organization / Multi-tenancy Models
+// ============================================
+
+model Organization {
+  id        String             @id @default(uuid())
+  name      String
+  slug      String             @unique
+  status    OrganizationStatus @default(active)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  deletedAt DateTime?
+
+  // Branding settings
+  logoUrl          String?
+  primaryColor     String  @default("#0066CC")
+  secondaryColor   String  @default("#6B7280")
+  faviconUrl       String?
+  emailFromName    String?
+  emailFooterText  String?
+  emailFooterLinks Json? // [{ label: string, url: string }]
+
+  // Relations
+  emailTemplates OrganizationEmailTemplate[]
+
+  // Auth configuration
+  authProviderType   OrganizationAuthProvider @default(local)
+  authProviderConfig Json?
+
+  // Azure AD SSO Configuration (per-organization)
+  azureAdEnabled      Boolean @default(false)
+  azureAdClientId     String?
+  azureAdClientSecret String?
+  azureAdTenantId     String?
+  azureAdRedirectUri  String?
+
+  // Per-organization Email Configuration (SMTP/IMAP)
+  // JSON structure: { smtp: { host, port, secure, user, pass, fromAddress, fromName }, imap: { host, port, secure, user, pass, inboxFolder } }
+  emailSettings Json?
+
+  // Subscription/Limits (legacy - now controlled by license token)
+  maxUsers   Int @default(50)
+  maxStorage Int @default(10) // GB
+
+  // License Token (JWT signed license)
+  licenseToken       String?   @unique
+  licenseActivatedAt DateTime?
+
+  // Relations
+  users             OrganizationUser[]
+  invitations       OrganizationInvitation[]
+  teams             Team[]
+  tickets           Ticket[]
+  categories        Category[]
+  comments          Comment[]
+  attachments       Attachment[]
+  articleCategories ArticleCategory[]
+  articles          Article[]
+  serviceCategories ServiceCategory[]
+  services          Service[]
+  serviceRequests   ServiceRequest[]
+  assetTypes        AssetType[]
+  assets            Asset[]
+  slaPolicies       SlaPolicy[]
+  olaPolicies       OlaPolicy[]
+  olaHandovers      OlaHandoff[]
+  problems          Problem[]
+  changes           ChangeRequest[]
+  changeCategories  ChangeCategory[]
+  software          Software[]
+  softwareLicenses  SoftwareLicense[]
+  csatConfigs       CsatSurveyConfig[]
+  cabMeetings       CABMeeting[]
+  chatbotSessions   ChatbotSession[]
+  chatbotConfigs    ChatbotConfig[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+model OrganizationUser {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String
+  orgRole        OrganizationRole @default(requester)
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([organizationId, orgRole])
+}
+
+// Organization Invitation
+model OrganizationInvitation {
+  id             String                @id @default(uuid())
+  organizationId String
+  email          String
+  role           OrganizationRole      @default(requester)
+  token          String                @unique
+  status         OrganizationInvStatus @default(pending)
+  invitedBy      String // User ID who sent the invitation
+  message        String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@index([email])
+  @@index([token])
+  @@index([status])
+}
+
+// Organization Email Template - customizable email templates per organization
+model OrganizationEmailTemplate {
+  id             String            @id @default(uuid())
+  organizationId String
+  templateType   EmailTemplateType
+  subject        String
+  body           String            @db.Text // HTML content
+  isCustomized   Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, templateType])
+  @@index([organizationId])
+}
+
+enum OrganizationInvStatus {
+  pending
+  accepted
+  declined
+  expired
+}
+
+// Enums for Organization
+enum OrganizationStatus {
+  active
+  suspended
+  pending
+}
+
+enum OrganizationRole {
+  orgadmin
+  manager
+  approver
+  agent
+  requester
+}
+
+enum OrganizationTier {
+  starter
+  standard
+  premium
+  enterprise
+}
+
+enum OrganizationAuthProvider {
+  local
+  azure_ad
+  google
+  saml
+  okta
+}
+
+// Email template types for organization customization
+enum EmailTemplateType {
+  TICKET_CREATED
+  TICKET_ASSIGNED
+  TICKET_UPDATED
+  TICKET_RESOLVED
+  TICKET_CLOSED
+  TICKET_COMMENT
+  SERVICE_REQUEST_SUBMITTED
+  SERVICE_REQUEST_APPROVED
+  SERVICE_REQUEST_REJECTED
+  SERVICE_REQUEST_COMPLETED
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+  ORG_INVITATION
+}
+
+model User {
+  id                 String                      @id @default(uuid())
+  email              String                      @unique
+  password           String?
+  firstName          String
+  lastName           String
+  role               UserRole                    @default(user)
+  tier               UserTier                    @default(standard) // For tier-based SLA
+  jobTitle           String?
+  department         String?
+  phone              String?
+  avatarUrl          String?
+  isActive           Boolean                     @default(true)
+  azureAdId          String?                     @unique
+  authProvider       AuthProvider                @default(local)
+  primaryTeamId      String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  deletedAt          DateTime?
+  articleApprovals   Article[]                   @relation("ArticleApprovedBy")
+  articleAssignments Article[]                   @relation("ArticleAssignedTo")
+  createdArticles    Article[]                   @relation("ArticleCreator")
+  attachments        Attachment[]
+  comments           Comment[]
+  createdServices    Service[]                   @relation("ServiceCreator")
+  approvedRequests   ServiceRequest[]            @relation("ServiceRequestApprovedBy")
+  approvals          ServiceRequest[]            @relation("ServiceRequestApprover")
+  serviceRequests    ServiceRequest[]            @relation("ServiceRequestRequester")
+  teamLeads          Team[]                      @relation("TeamLead")
+  assignedTickets    Ticket[]                    @relation("TicketAgent")
+  createdTickets     Ticket[]                    @relation("TicketRequester")
+  teams              UserTeam[]
+  assignedAssets     Asset[]
+  changeRequests     ChangeRequest[]             @relation("ChangeRequestRequester")
+  changeAssignments  ChangeRequest[]             @relation("ChangeRequestAssignee")
+  changeApprovals    ChangeRequest[]             @relation("ChangeRequestApprover")
+  changeRejections   ChangeRequest[]             @relation("ChangeRequestRejector")
+  licenseAssignments SoftwareLicenseAssignment[]
+  organizationUsers  OrganizationUser[]
+  chatbotSessions    ChatbotSession[]
+
+  @@index([email])
+  @@index([azureAdId])
+}
+
+model Team {
+  id                String        @id @default(uuid())
+  name              String
+  type              TeamType
+  description       String?
+  isActive          Boolean       @default(true)
+  leadId            String?
+  organizationId    String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  defaultCategories Category[]
+  services          Service[]
+  lead              User?         @relation("TeamLead", fields: [leadId], references: [id])
+  tickets           Ticket[]
+  members           UserTeam[]
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+  @@index([organizationId])
+}
+
+model UserTeam {
+  id        String   @id @default(uuid())
+  userId    String
+  teamId    String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
+}
+
+model Category {
+  id             String        @id @default(uuid())
+  name           String
+  description    String?
+  isActive       Boolean       @default(true)
+  sortOrder      Int           @default(0)
+  parentId       String?
+  defaultTeamId  String?
+  organizationId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  defaultTeam    Team?         @relation(fields: [defaultTeamId], references: [id])
+  parent         Category?     @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children       Category[]    @relation("CategoryHierarchy")
+  tickets        Ticket[]
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([name])
+  @@index([parentId])
+  @@index([organizationId])
+}
+
+model Ticket {
+  id                    String                @id @default(uuid())
+  ticketNumber          String
+  channel               TicketChannel         @default(manual)
+  type                  TicketType
+  status                TicketStatus          @default(new)
+  priority              TicketPriority        @default(medium)
+  title                 String
+  description           String
+  requesterId           String
+  assignedAgentId       String?
+  assignedTeamId        String?
+  categoryId            String?
+  organizationId        String?
+  firstResponseAt       DateTime?
+  firstResponseDeadline DateTime? // First Response Time target
+  frtBreached           Boolean               @default(false)
+  resolvedAt            DateTime?
+  closedAt              DateTime?
+  slaDeadline           DateTime? // Resolution Time target
+  slaBreached           Boolean               @default(false)
+  slaBreachNotified     Boolean               @default(false)
+  lastActivityAt        DateTime? // For escalation tracking
+  escalationLevel       Int                   @default(0) // Track how many times escalated
+  externalId            String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  deletedAt             DateTime?
+  slaPolicy             SlaPolicy?            @relation(fields: [slaPolicyId], references: [id])
+  slaPolicyId           String?
+  attachments           Attachment[]
+  comments              Comment[]
+  linkedTicket          ServiceRequest?       @relation("ServiceRequestToTicket")
+  assignedAgent         User?                 @relation("TicketAgent", fields: [assignedAgentId], references: [id])
+  assignedTeam          Team?                 @relation(fields: [assignedTeamId], references: [id])
+  category              Category?             @relation(fields: [categoryId], references: [id])
+  requester             User                  @relation("TicketRequester", fields: [requesterId], references: [id])
+  statusHistory         TicketStatusHistory[]
+  assets                AssetTicket[]
+  problemLinks          ProblemIncident[]
+  linkedToChanges       ChangeLinkedTicket[]
+  escalations           TicketEscalation[]
+  csatSurvey            CsatSurvey?
+  organization          Organization?         @relation(fields: [organizationId], references: [id])
+
+  @@unique([ticketNumber, organizationId])
+  @@index([status])
+  @@index([priority])
+  @@index([requesterId])
+  @@index([assignedAgentId])
+  @@index([assignedTeamId])
+  @@index([slaDeadline])
+  @@index([status, slaDeadline])
+  @@index([assignedTeamId, status])
+  @@index([priority, status])
+  @@index([type, createdAt])
+  @@index([organizationId])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, assignedAgentId, status])
+  @@index([organizationId, priority, status])
+}
+
+model TicketStatusHistory {
+  id          String        @id @default(uuid())
+  ticketId    String
+  fromStatus  TicketStatus?
+  toStatus    TicketStatus
+  changedById String
+  changedBy   String
+  reason      String?
+  createdAt   DateTime      @default(now())
+  ticket      Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id                String        @id @default(uuid())
+  ticketId          String
+  authorId          String
+  content           String
+  isInternal        Boolean       @default(false)
+  // Email-related fields for reply functionality
+  channel           String?       @default("web") // web, email, chat, phone, api
+  replyToAddresses  String? // Comma-separated email addresses for email replies
+  originalMessageId String? // Original email Message-ID for threading
+  originalSubject   String? // Original email subject for reference
+  organizationId    String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  author            User          @relation(fields: [authorId], references: [id])
+  ticket            Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([ticketId])
+  @@index([authorId])
+  @@index([channel])
+  @@index([organizationId])
+  @@index([ticketId, createdAt])
+  @@index([ticketId, isInternal])
+}
+
+model Attachment {
+  id             String        @id @default(uuid())
+  ticketId       String? // Optional - required when linked to a ticket, null for chatbot attachments
+  uploadedById   String
+  filename       String
+  originalName   String
+  fileSize       Int
+  mimeType       String
+  storagePath    String
+  url            String
+  description    String?
+  organizationId String?
+  createdAt      DateTime      @default(now())
+  ticket         Ticket?       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  uploadedBy     User          @relation(fields: [uploadedById], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([ticketId])
+  @@index([uploadedById])
+  @@index([organizationId])
+}
+
+model ArticleCategory {
+  id             String            @id @default(uuid())
+  name           String
+  slug           String
+  description    String?
+  icon           String?
+  color          String?
+  sortOrder      Int               @default(0)
+  isActive       Boolean           @default(true)
+  parentId       String?
+  organizationId String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  articles       Article[]
+  parent         ArticleCategory?  @relation("ArticleCategoryHierarchy", fields: [parentId], references: [id])
+  children       ArticleCategory[] @relation("ArticleCategoryHierarchy")
+  organization   Organization?     @relation(fields: [organizationId], references: [id])
+
+  @@unique([slug, organizationId])
+  @@index([parentId])
+  @@index([organizationId])
+}
+
+model Tag {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  slug        String       @unique
+  description String?
+  color       String       @default("#6366f1")
+  createdAt   DateTime     @default(now())
+  articles    ArticleTag[]
+
+  @@index([slug])
+}
+
+model Article {
+  id              String            @id @default(uuid())
+  title           String
+  slug            String
+  content         String
+  summary         String?
+  status          ArticleStatus     @default(draft)
+  categoryId      String
+  organizationId  String?
+  metaTitle       String?
+  metaDescription String?
+  views           Int               @default(0)
+  helpfulYes      Int               @default(0)
+  helpfulNo       Int               @default(0)
+  relatedTickets  String?
+  assignedToId    String?
+  createdById     String
+  approvedById    String?
+  approvedAt      DateTime?
+  publishedAt     DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  approvedBy      User?             @relation("ArticleApprovedBy", fields: [approvedById], references: [id])
+  assignedTo      User?             @relation("ArticleAssignedTo", fields: [assignedToId], references: [id])
+  category        ArticleCategory   @relation(fields: [categoryId], references: [id])
+  createdBy       User              @relation("ArticleCreator", fields: [createdById], references: [id])
+  feedbacks       ArticleFeedback[]
+  tags            ArticleTag[]
+  viewRecords     ArticleView[]
+  organization    Organization?     @relation(fields: [organizationId], references: [id])
+  embeddings      ArticleEmbedding[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([categoryId])
+  @@index([status, categoryId])
+  @@index([status, createdAt])
+  @@index([organizationId])
+}
+
+model ArticleTag {
+  id        String  @id @default(uuid())
+  articleId String
+  tagId     String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, tagId])
+  @@index([articleId])
+  @@index([tagId])
+}
+
+model ArticleView {
+  id        String   @id @default(uuid())
+  articleId String
+  viewerIp  String?
+  userAgent String?
+  viewedAt  DateTime @default(now())
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([viewedAt])
+}
+
+model ArticleFeedback {
+  id        String   @id @default(uuid())
+  articleId String
+  helpful   Boolean
+  userIp    String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+}
+
+// Article embeddings for semantic search
+model ArticleEmbedding {
+  id         String @id @default(uuid())
+  articleId  String
+  chunkIndex Int    @default(0)
+  content    String // Text chunk for reference
+  vector     Float[] // Vector embedding (1536 dimensions for DeepSeek/OpenAI embedding models)
+
+  article    Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+}
+
+model ServiceCategory {
+  id             String        @id @default(uuid())
+  name           String
+  slug           String
+  description    String?
+  icon           String?
+  color          String?
+  sortOrder      Int           @default(0)
+  isActive       Boolean       @default(true)
+  organizationId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  services       Service[]
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([slug])
+  @@index([organizationId])
+}
+
+model ChangeCategory {
+  id             String          @id @default(uuid())
+  name           String
+  description    String?
+  sortOrder      Int             @default(0)
+  isActive       Boolean         @default(true)
+  organizationId String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  changes        ChangeRequest[]
+  organization   Organization?   @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+}
+
+model Service {
+  id                String           @id @default(uuid())
+  name              String
+  slug              String
+  description       String?
+  shortDescription  String?
+  status            ServiceStatus    @default(draft)
+  categoryId        String
+  organizationId    String?
+  price             Decimal?         @db.Decimal(10, 2)
+  currency          String           @default("USD")
+  deliveryTimeDays  Int?
+  requiresApproval  Boolean          @default(true)
+  autoFulfill       Boolean          @default(false)
+  autoFulfillAction String?
+  slaHours          Int?
+  formFields        Json?
+  instructions      String?
+  relatedKbArticles String?
+  assignedTeamId    String?
+  assignedAgentId   String?
+  requestCount      Int              @default(0)
+  completionRate    Decimal?         @db.Decimal(5, 2)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  assignedAgent     User?            @relation("ServiceCreator", fields: [assignedAgentId], references: [id])
+  assignedTeam      Team?            @relation(fields: [assignedTeamId], references: [id])
+  category          ServiceCategory  @relation(fields: [categoryId], references: [id])
+  requests          ServiceRequest[]
+  organization      Organization?    @relation(fields: [organizationId], references: [id])
+
+  @@index([slug])
+  @@index([status])
+  @@index([categoryId])
+  @@index([organizationId])
+}
+
+model ServiceRequest {
+  id               String               @id @default(uuid())
+  requestNumber    String               @unique
+  serviceId        String
+  requesterId      String
+  organizationId   String?
+  status           ServiceRequestStatus @default(draft)
+  justification    String?
+  formData         Json?
+  approvalRequired Boolean              @default(true)
+  approverId       String?
+  approvedById     String?
+  approvedAt       DateTime?
+  approvalComments String?
+  slaDeadline      DateTime?
+  slaBreached      Boolean              @default(false)
+  linkedTicketId   String?              @unique
+  linkedTicket     Ticket?              @relation("ServiceRequestToTicket", fields: [linkedTicketId], references: [id])
+  completedAt      DateTime?
+  completionNotes  String?
+  userFeedback     String?
+  rating           Int?
+  submittedAt      DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  approvedBy       User?                @relation("ServiceRequestApprovedBy", fields: [approvedById], references: [id])
+  approver         User?                @relation("ServiceRequestApprover", fields: [approverId], references: [id])
+  requester        User                 @relation("ServiceRequestRequester", fields: [requesterId], references: [id])
+  service          Service              @relation(fields: [serviceId], references: [id])
+  organization     Organization?        @relation(fields: [organizationId], references: [id])
+
+  @@index([requestNumber])
+  @@index([status])
+  @@index([serviceId])
+  @@index([requesterId])
+  @@index([slaDeadline])
+  @@index([status, createdAt])
+  @@index([organizationId])
+  @@index([organizationId, status, createdAt])
+}
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  action          String // CREATE, UPDATE, DELETE, CREATE_FAILED, UPDATE_FAILED, DELETE_FAILED
+  entityType      String // e.g., "tickets", "users", "organizations"
+  entityId        String // ID of the affected entity
+  organizationId  String? // Org-scoped isolation
+  userId          String?
+  userEmail       String?
+  userRole        String?
+  changes         Json? // Before/after values for updates
+  metadata        Json? // Additional context (error messages, etc.)
+  method          String? // HTTP method (POST, PUT, PATCH, DELETE)
+  path            String? // Request path
+  ipAddress       String?
+  userAgent       String?
+  executionTimeMs Int?
+  statusCode      Int? // Response status code
+  createdAt       DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@index([organizationId])
+  @@index([statusCode])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, createdAt])
+  @@index([organizationId, action, createdAt])
+  @@index([userId, createdAt])
+}
+
+model EmailQueue {
+  id          String    @id @default(uuid())
+  type        String
+  direction   String
+  fromAddress String
+  toAddress   String
+  subject     String
+  body        String
+  htmlBody    String?
+  status      String    @default("pending")
+  attempts    Int       @default(0)
+  lastError   String?
+  metadata    Json?
+  scheduledAt DateTime?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+enum UserRole {
+  user
+  superadmin
+}
+
+// User tier for tier-based SLA policies
+enum UserTier {
+  standard // Default tier
+  premium // Higher priority SLA
+  enterprise // Highest priority SLA
+  vip // Executive/priority support
+}
+
+enum TicketType {
+  incident
+  service_request
+}
+
+enum TicketStatus {
+  new
+  assigned
+  in_progress
+  pending
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum TicketChannel {
+  manual
+  email
+  others
+}
+
+enum TeamType {
+  first_line
+  second_line
+  third_line
+}
+
+enum ArticleStatus {
+  draft
+  published
+  archived
+}
+
+enum ServiceStatus {
+  draft
+  active
+  inactive
+  retired
+}
+
+enum ServiceRequestStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  rejected
+  in_progress
+  completed
+  cancelled
+}
+
+enum AuthProvider {
+  azure_ad
+  local
+}
+
+// Asset Management / CMDB
+model AssetType {
+  id             String        @id @default(uuid())
+  name           String
+  slug           String
+  description    String?
+  icon           String?
+  color          String?
+  sortOrder      Int           @default(0)
+  isActive       Boolean       @default(true)
+  organizationId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  assets         Asset[]
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([slug])
+  @@index([organizationId])
+}
+
+model Asset {
+  id                  String                      @id @default(uuid())
+  name                String
+  assetTag            String?
+  serialNumber        String?
+  typeId              String
+  organizationId      String?
+  status              AssetStatus                 @default(active)
+  manufacturer        String?
+  model               String?
+  version             String?
+  vendor              String?
+  purchaseDate        DateTime?
+  purchaseCost        Decimal?                    @db.Decimal(12, 2)
+  warrantyExpiry      DateTime?
+  location            String?
+  department          String?
+  assignedToId        String?
+  assignedToType      AssignedToType?
+  ipAddress           String?
+  macAddress          String?
+  hostname            String?
+  operatingSystem     String?
+  cpu                 String?
+  ram                 String?
+  storage             String?
+  notes               String?
+  metadata            Json?
+  lastInventoryAt     DateTime?
+  // CMDB Enhancement: CI Classification
+  businessCriticality CiCriticality               @default(moderate)
+  technicalComplexity CiComplexity                @default(standard)
+  ciClass             CiClass?
+  riskLevel           RiskLevel?
+  configurationItems  Json? // Store configuration item attributes as JSON
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  deletedAt           DateTime?
+  type                AssetType                   @relation(fields: [typeId], references: [id])
+  assignedTo          User?                       @relation(fields: [assignedToId], references: [id])
+  parentAssetId       String?
+  parentAsset         Asset?                      @relation("AssetHierarchy", fields: [parentAssetId], references: [id])
+  childAssets         Asset[]                     @relation("AssetHierarchy")
+  relationshipsFrom   AssetRelationship[]         @relation("AssetRelationshipFrom")
+  relationshipsTo     AssetRelationship[]         @relation("AssetRelationshipTo")
+  tickets             AssetTicket[]
+  maintenanceRecords  AssetMaintenance[]
+  affectedByChanges   ChangeAffectedAsset[]
+  licenseAssignments  SoftwareLicenseAssignment[]
+  organization        Organization?               @relation(fields: [organizationId], references: [id])
+
+  @@unique([assetTag, organizationId])
+  @@index([serialNumber])
+  @@index([status])
+  @@index([typeId])
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([businessCriticality])
+  @@index([ciClass])
+  @@index([riskLevel])
+  @@index([status, businessCriticality])
+  @@index([department, status])
+  @@index([typeId, status])
+  @@index([organizationId, status])
+  @@index([organizationId, typeId])
+  @@index([organizationId, businessCriticality])
+}
+
+model AssetRelationship {
+  id          String           @id @default(uuid())
+  fromAssetId String
+  toAssetId   String
+  type        RelationshipType
+  description String?
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  fromAsset   Asset            @relation("AssetRelationshipFrom", fields: [fromAssetId], references: [id], onDelete: Cascade)
+  toAsset     Asset            @relation("AssetRelationshipTo", fields: [toAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([fromAssetId, toAssetId, type])
+  @@index([fromAssetId])
+  @@index([toAssetId])
+}
+
+model AssetMaintenance {
+  id          String            @id @default(uuid())
+  assetId     String
+  type        MaintenanceType
+  title       String
+  description String?
+  performedBy String?
+  performedAt DateTime?
+  nextDueDate DateTime?
+  cost        Decimal?          @db.Decimal(10, 2)
+  status      MaintenanceStatus @default(scheduled)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  asset       Asset             @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId])
+  @@index([status])
+  @@index([nextDueDate])
+}
+
+model AssetTicket {
+  id        String   @id @default(uuid())
+  assetId   String
+  ticketId  String
+  createdAt DateTime @default(now())
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, ticketId])
+  @@index([assetId])
+  @@index([ticketId])
+}
+
+enum AssetStatus {
+  active
+  inactive
+  under_maintenance
+  retired
+  disposed
+}
+
+enum AssignedToType {
+  user
+  team
+  location
+}
+
+enum RelationshipType {
+  hosts
+  depends_on
+  connects_to
+  supports
+  runs_on
+  backup_of
+  replicated_to
+}
+
+enum MaintenanceType {
+  preventive
+  corrective
+  adaptive
+  perfective
+}
+
+enum MaintenanceStatus {
+  scheduled
+  in_progress
+  completed
+  cancelled
+}
+
+// Problem Management / CMDB
+model Problem {
+  id              String                @id @default(uuid())
+  problemNumber   String                @unique
+  title           String
+  description     String?
+  status          ProblemStatus         @default(new)
+  priority        TicketPriority        @default(medium)
+  impact          ProblemImpact         @default(moderate)
+  category        String?
+  assignedToId    String?
+  closedAt        DateTime?
+  resolvedAt      DateTime?
+  organizationId  String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  closedById      String?
+  resolvedById    String?
+  incidents       ProblemIncident[]
+  rootCauses      RootCauseAnalysis[]
+  knownError      KnownError?
+  linkedToChanges ChangeLinkedProblem[]
+  organization    Organization?         @relation(fields: [organizationId], references: [id])
+
+  @@index([problemNumber])
+  @@index([status])
+  @@index([priority])
+  @@index([assignedToId])
+  @@index([status, priority])
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@index([organizationId, status, priority])
+  @@index([organizationId, assignedToId])
+}
+
+model ProblemIncident {
+  id          String   @id @default(uuid())
+  problemId   String
+  ticketId    String
+  impactLevel String?
+  createdAt   DateTime @default(now())
+  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, ticketId])
+  @@index([problemId])
+  @@index([ticketId])
+}
+
+model RootCauseAnalysis {
+  id           String   @id @default(uuid())
+  problemId    String
+  analysisType RCAType  @default(root_cause)
+  title        String
+  description  String?
+  cause        String?
+  impact       String?
+  solution     String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  problem      Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+}
+
+model KnownError {
+  id            String           @id @default(uuid())
+  problemId     String           @unique
+  errorCode     String?
+  symptoms      String?
+  workaround    String?
+  knownSolution String?
+  kbArticleId   String?
+  status        KnownErrorStatus @default(active)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  problem       Problem          @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@index([problemId])
+  @@index([status])
+}
+
+enum ProblemStatus {
+  new
+  investigating
+  identified
+  resolved
+  closed
+}
+
+enum ProblemImpact {
+  low
+  moderate
+  high
+  critical
+}
+
+enum RCAType {
+  root_cause
+  contributing_factor
+  environmental
+}
+
+enum KnownErrorStatus {
+  active
+  resolved
+  obsolete
+}
+
+// Change Management
+model ChangeRequest {
+  id                 String         @id @default(uuid())
+  changeNumber       String         @unique
+  title              String
+  description        String
+  type               ChangeType
+  status             ChangeStatus   @default(draft)
+  priority           ChangePriority @default(medium)
+  risk               ChangeRisk     @default(low)
+  justification      String?
+  implementationPlan String?
+  rollbackPlan       String?
+  requestedById      String?
+  assignedToId       String?
+  approvedById       String?
+  rejectedById       String?
+  cabReviewed        Boolean        @default(false)
+  scheduledStartDate DateTime?
+  scheduledEndDate   DateTime?
+  actualStartDate    DateTime?
+  actualEndDate      DateTime?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectedReason     String?
+  closureNotes       String?
+  organizationId     String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  // Relations
+  changeCategoryId String?
+  requester        User?                 @relation("ChangeRequestRequester", fields: [requestedById], references: [id])
+  assignee         User?                 @relation("ChangeRequestAssignee", fields: [assignedToId], references: [id])
+  approver         User?                 @relation("ChangeRequestApprover", fields: [approvedById], references: [id])
+  rejector         User?                 @relation("ChangeRequestRejector", fields: [rejectedById], references: [id])
+  changeCategory   ChangeCategory?       @relation(fields: [changeCategoryId], references: [id])
+  riskAssessment   RiskAssessment?
+  affectedAssets   ChangeAffectedAsset[]
+  approvals        ChangeApproval[]
+  linkedProblems   ChangeLinkedProblem[]
+  linkedTickets    ChangeLinkedTicket[]
+  organization     Organization?         @relation(fields: [organizationId], references: [id])
+
+  @@index([changeNumber])
+  @@index([status])
+  @@index([type])
+  @@index([priority])
+  @@index([requestedById])
+  @@index([scheduledStartDate])
+  @@index([status, scheduledStartDate])
+  @@index([type, status])
+  @@index([organizationId])
+}
+
+model RiskAssessment {
+  id              String        @id @default(uuid())
+  changeRequestId String        @unique
+  riskLevel       ChangeRisk
+  impactLevel     String?
+  probability     String?
+  riskDescription String?
+  mitigationSteps String?
+  contingencyPlan String?
+  riskOwner       String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  changeRequest   ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+
+  @@index([changeRequestId])
+}
+
+model CABMeeting {
+  id             String           @id @default(uuid())
+  title          String
+  description    String?
+  scheduledAt    DateTime
+  location       String?
+  status         CABMeetingStatus @default(scheduled)
+  notes          String?
+  decisions      String?
+  createdById    String?
+  organizationId String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  agendaItems    CABAgendaItem[]
+  organization   Organization?    @relation(fields: [organizationId], references: [id])
+
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([organizationId])
+}
+
+model CABAgendaItem {
+  id              String     @id @default(uuid())
+  cabMeetingId    String
+  changeRequestId String?
+  title           String
+  description     String?
+  presenter       String?
+  duration        Int? // minutes
+  decision        String?
+  orderIndex      Int        @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  cabMeeting      CABMeeting @relation(fields: [cabMeetingId], references: [id], onDelete: Cascade)
+
+  @@index([cabMeetingId])
+}
+
+model ChangeApproval {
+  id              String               @id @default(uuid())
+  changeRequestId String
+  approverId      String
+  role            ChangeApproverRole
+  status          ChangeApprovalStatus @default(pending)
+  comments        String?
+  decision        String?
+  approvedAt      DateTime?
+  delegatedToId   String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  changeRequest   ChangeRequest        @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+
+  @@index([changeRequestId])
+  @@index([approverId])
+}
+
+model ChangeAffectedAsset {
+  id              String        @id @default(uuid())
+  changeRequestId String
+  assetId         String
+  impact          String?
+  description     String?
+  createdAt       DateTime      @default(now())
+  changeRequest   ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  asset           Asset         @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([changeRequestId, assetId])
+  @@index([changeRequestId])
+  @@index([assetId])
+}
+
+model ChangeLinkedProblem {
+  id              String        @id @default(uuid())
+  changeRequestId String
+  problemId       String
+  reason          String?
+  createdAt       DateTime      @default(now())
+  changeRequest   ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  problem         Problem       @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([changeRequestId, problemId])
+  @@index([changeRequestId])
+  @@index([problemId])
+}
+
+model ChangeLinkedTicket {
+  id              String        @id @default(uuid())
+  changeRequestId String
+  ticketId        String
+  reason          String?
+  createdAt       DateTime      @default(now())
+  changeRequest   ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  ticket          Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([changeRequestId, ticketId])
+  @@index([changeRequestId])
+  @@index([ticketId])
+}
+
+enum ChangeType {
+  standard // Pre-approved, low risk
+  normal // Full approval required
+  emergency // Fast-track approval
+}
+
+enum ChangeStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  rejected
+  scheduled
+  in_progress
+  completed
+  cancelled
+  closed
+}
+
+enum ChangePriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum ChangeRisk {
+  low
+  medium
+  high
+  critical
+}
+
+enum CABMeetingStatus {
+  scheduled
+  in_progress
+  completed
+  cancelled
+}
+
+enum ChangeApproverRole {
+  manager
+  cab
+  it_security
+  business_owner
+  final_approver
+}
+
+enum ChangeApprovalStatus {
+  pending
+  approved
+  rejected
+  delegated
+}
+
+// ============================================
+// Advanced SLA Management
+// ============================================
+
+// Configurable SLA Policies
+model SlaPolicy {
+  id                  String              @id @default(uuid())
+  name                String
+  description         String?
+  isActive            Boolean             @default(true)
+  priority            TicketPriority // Which priority level this applies to
+  ticketType          TicketType? // Optional: specific ticket type
+  categoryId          String? // Optional: specific category
+  userTier            UserTier? // Optional: specific user tier
+  responseTimeHours   Int // First Response Time target in hours
+  resolutionTimeHours Int // Resolution Time target in hours
+  warningThreshold    Int                 @default(75) // Percentage to send warning (e.g., 75%)
+  organizationId      String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  tickets             Ticket[]
+  escalationRules     SlaEscalationRule[]
+  organization        Organization?       @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+  @@index([priority])
+  @@index([ticketType])
+  @@index([isActive])
+  @@index([organizationId])
+  @@index([organizationId, isActive, priority])
+}
+
+// SLA Escalation Rules
+model SlaEscalationRule {
+  id               String              @id @default(uuid())
+  name             String
+  description      String?
+  slaPolicyId      String
+  priority         TicketPriority // Which priority this rule applies to
+  condition        EscalationCondition
+  thresholdHours   Int // Hours after which this rule triggers
+  action           EscalationAction
+  actionTarget     String? // Target team/user ID for escalation
+  notifyManager    Boolean             @default(false)
+  increasePriority Boolean             @default(false)
+  isActive         Boolean             @default(true)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  slaPolicy        SlaPolicy           @relation(fields: [slaPolicyId], references: [id], onDelete: Cascade)
+
+  @@index([slaPolicyId])
+  @@index([isActive])
+}
+
+// Ticket Escalation History
+model TicketEscalation {
+  id            String           @id @default(uuid())
+  ticketId      String
+  ruleId        String?
+  reason        String
+  previousLevel Int              @default(0)
+  newLevel      Int              @default(1)
+  actionTaken   EscalationAction
+  notifiedUsers String[] // Array of user IDs notified
+  createdAt     DateTime         @default(now())
+  ticket        Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+// OLA (Operational Level Agreement) for internal team handoffs
+model OlaPolicy {
+  id                  String        @id @default(uuid())
+  name                String
+  description         String?
+  isActive            Boolean       @default(true)
+  fromTeamType        TeamType // Source team type
+  toTeamType          TeamType // Target team type
+  responseTimeHours   Int // Target response time for handoff
+  resolutionTimeHours Int // Target resolution time for handoff
+  organizationId      String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  organization        Organization? @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+  @@index([fromTeamType])
+  @@index([toTeamType])
+  @@index([isActive])
+  @@index([organizationId])
+  @@index([fromTeamType, toTeamType, isActive])
+}
+
+// Track team handoffs
+model OlaHandoff {
+  id               String        @id @default(uuid())
+  ticketId         String
+  organizationId   String?
+  fromTeamId       String
+  toTeamId         String
+  initiatedById    String
+  responseDeadline DateTime? // When response is expected
+  resolvedDeadline DateTime? // When resolution is expected
+  responseAt       DateTime? // When response was sent
+  resolvedAt       DateTime? // When resolution was sent
+  responseMet      Boolean?
+  resolutionMet    Boolean?
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([ticketId])
+  @@index([fromTeamId])
+  @@index([toTeamId])
+  @@index([organizationId])
+}
+
+// Enums for SLA
+enum EscalationCondition {
+  not_assigned // Ticket not assigned within threshold
+  no_response // No first response within threshold
+  no_update // No update/comment within threshold
+  approaching_breach // SLA deadline approaching (percentage)
+}
+
+enum EscalationAction {
+  notify_agent
+  notify_manager
+  notify_team
+  escalate_to_team
+  increase_priority
+  auto_assign
+  send_email
+}
+
+// ============================================
+// CMDB Enhancement: Software License Tracking
+// ============================================
+
+// Software application catalog
+model Software {
+  id             String            @id @default(uuid())
+  name           String
+  slug           String
+  version        String?
+  vendor         String?
+  publisher      String?
+  description    String?
+  category       SoftwareCategory?
+  licenseType    LicenseType
+  isActive       Boolean           @default(true)
+  supportUrl     String?
+  downloadUrl    String?
+  notes          String?
+  organizationId String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  licenses       SoftwareLicense[]
+  organization   Organization?     @relation(fields: [organizationId], references: [id])
+
+  @@unique([slug, organizationId])
+  @@index([licenseType])
+  @@index([organizationId])
+}
+
+// Software licenses
+model SoftwareLicense {
+  id             String                      @id @default(uuid())
+  licenseKey     String?
+  softwareId     String
+  name           String
+  licenseType    LicenseType
+  totalSeats     Int
+  purchasedSeats Int                         @default(0)
+  cost           Decimal?                    @db.Decimal(12, 2)
+  purchaseDate   DateTime?
+  expiryDate     DateTime?
+  vendor         String?
+  subscriptionId String?
+  notes          String?
+  isActive       Boolean                     @default(true)
+  organizationId String?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  software       Software                    @relation(fields: [softwareId], references: [id])
+  assignments    SoftwareLicenseAssignment[]
+  organization   Organization?               @relation(fields: [organizationId], references: [id])
+
+  @@index([softwareId])
+  @@index([expiryDate])
+  @@index([isActive])
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+  @@index([organizationId, isActive, expiryDate])
+}
+
+// License assignments to users or assets
+model SoftwareLicenseAssignment {
+  id           String          @id @default(uuid())
+  licenseId    String
+  userId       String?
+  assetId      String?
+  assignedById String?
+  assignedAt   DateTime        @default(now())
+  revokedAt    DateTime?
+  revokedById  String?
+  notes        String?
+  license      SoftwareLicense @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+  user         User?           @relation(fields: [userId], references: [id])
+  asset        Asset?          @relation(fields: [assetId], references: [id])
+
+  @@index([licenseId])
+  @@index([userId])
+  @@index([assetId])
+  @@index([assignedAt])
+}
+
+// Enums for CMDB/License Management
+enum CiCriticality {
+  low
+  moderate
+  high
+  critical
+}
+
+enum CiComplexity {
+  simple
+  standard
+  complex
+  highly_complex
+}
+
+enum CiClass {
+  application
+  database
+  server
+  network
+  storage
+  endpoint
+  security
+  cloud
+  virtualization
+  middleware
+  integration
+  other
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+  critical
+}
+
+enum SoftwareCategory {
+  operating_system
+  productivity
+  development
+  security
+  database
+  networking
+  collaboration
+  communication
+  media
+  graphics
+  utility
+  other
+}
+
+enum LicenseType {
+  perpetual
+  subscription
+  per_seat
+  site_license
+  oem
+  volume
+  freeware
+  open_source
+}
+
+// ============================================
+// CSAT (Customer Satisfaction) Surveys
+// ============================================
+
+// Survey configuration - when/how surveys are sent
+model CsatSurveyConfig {
+  id                 String         @id @default(uuid())
+  name               String
+  description        String?
+  isActive           Boolean        @default(true)
+  sendDelayHours     Int            @default(24) // Hours after resolution to send
+  reminderDelayHours Int            @default(72) // Hours after first send to send reminder
+  maxReminders       Int            @default(2) // Maximum reminder emails
+  minTicketAgeHours  Int            @default(1) // Minimum ticket age to send survey
+  requireComment     Boolean        @default(false) // Require additional comment
+  organizationId     String?
+  questions          CsatQuestion[]
+  surveys            CsatSurvey[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  organization       Organization?  @relation(fields: [organizationId], references: [id])
+
+  @@unique([name, organizationId])
+  @@index([isActive])
+  @@index([organizationId])
+}
+
+// Survey questions
+model CsatQuestion {
+  id           String           @id @default(uuid())
+  configId     String
+  questionText String
+  questionType CsatQuestionType @default(rating)
+  isRequired   Boolean          @default(true)
+  scaleMin     Int              @default(1) // For rating scales
+  scaleMax     Int              @default(5)
+  orderIndex   Int              @default(0)
+  isActive     Boolean          @default(true)
+  createdAt    DateTime         @default(now())
+  config       CsatSurveyConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  responses    CsatResponse[]
+
+  @@index([configId])
+}
+
+// Individual survey responses
+model CsatSurvey {
+  id             String           @id @default(uuid())
+  ticketId       String           @unique // One survey per ticket
+  configId       String
+  status         CsatSurveyStatus @default(pending)
+  sentAt         DateTime?
+  firstViewedAt  DateTime?
+  completedAt    DateTime?
+  expiresAt      DateTime?
+  reminderCount  Int              @default(0)
+  lastReminderAt DateTime?
+  rating         Int? // Overall rating (1-5)
+  comment        String? // Optional comment
+  responses      CsatResponse[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  ticket         Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  config         CsatSurveyConfig @relation(fields: [configId], references: [id])
+
+  @@index([ticketId])
+  @@index([status])
+  @@index([sentAt])
+  @@index([completedAt])
+}
+
+// Individual question responses
+model CsatResponse {
+  id          String       @id @default(uuid())
+  surveyId    String
+  questionId  String
+  ratingValue Int? // For rating questions
+  textValue   String? // For text/feedback questions
+  createdAt   DateTime     @default(now())
+  survey      CsatSurvey   @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+  question    CsatQuestion @relation(fields: [questionId], references: [id])
+
+  @@index([surveyId])
+  @@index([questionId])
+}
+
+// Enums for CSAT
+enum CsatSurveyStatus {
+  pending // Survey created but not yet sent
+  sent // Survey email sent
+  viewed // User opened the survey
+  completed // User submitted the survey
+  expired // Survey expired without response
+  opted_out // User opted out of surveys
+}
+
+enum CsatQuestionType {
+  rating // 1-5 star rating
+  nps // Net Promoter Score (0-10)
+  satisfaction // Yes/No satisfaction question
+  comment // Free text comment
+  thumbs // Thumbs up/down
+}
+
+// ============================================
+// AI Chatbot Models
+// ============================================
+
+// Chatbot session - tracks user conversations
+model ChatbotSession {
+  id             String @id @default(uuid())
+  sessionId      String @unique
+  userId         String
+  organizationId String
+
+  // Session state
+  status        ChatbotSessionStatus @default(active)
+  lastMessageAt DateTime             @default(now())
+  createdAt     DateTime             @default(now())
+  closedAt      DateTime?
+
+  // Context (cached from user/org)
+  userEmail     String?
+  userFirstName String?
+  userLastName  String?
+  userOrgRole   String?
+
+  // Analytics
+  messageCount Int @default(0)
+
+  // Relations
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages     ChatbotMessage[]
+
+  @@index([organizationId, status])
+  @@index([userId])
+  @@index([lastMessageAt])
+}
+
+enum ChatbotSessionStatus {
+  active
+  awaiting_response
+  escalated
+  resolved
+  closed
+}
+
+// Chat message - individual messages in conversation
+model ChatbotMessage {
+  id        String @id @default(uuid())
+  sessionId String
+  messageId String @unique
+
+  // Content
+  role        ChatMessageRole // user, assistant, system
+  content     String
+  contentType ChatContentType @default(text)
+
+  // AI metadata
+  intent     String?
+  aiModel    String?
+  tokensUsed Int?
+
+  // Tool calls and references (JSON)
+  toolCalls  Json?
+  references Json?
+
+  // User feedback
+  userFeedback Json?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  session ChatbotSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([sessionId])
+  @@index([messageId])
+}
+
+enum ChatMessageRole {
+  user
+  assistant
+  system
+}
+
+enum ChatContentType {
+  text
+  rich
+  quick_reply
+  card
+}
+
+// Chatbot configuration per organization
+model ChatbotConfig {
+  id             String @id @default(uuid())
+  organizationId String @unique
+
+  // AI Configuration
+  aiModel       String @default("gpt-4o-mini")
+  aiTemperature Float  @default(0.7)
+  aiMaxTokens   Int    @default(2000)
+
+  // Custom API Key (per-organization)
+  // Optional: if provided, this will be used instead of the global system API key
+  aiApiKey     String? @map("ai_api_key")
+  aiApiBaseUrl String? @map("ai_api_base_url") // Custom endpoint for proxies/self-hosted models
+
+  // Embedding Configuration (separate from LLM config for flexibility)
+  embeddingModel   String  @default("text-embedding-3-small") // OpenAI default
+  embeddingBaseUrl String? @map("embedding_base_url") // Custom endpoint for embedding API
+  embeddingEnabled Boolean @default(true) @map("embedding_enabled") // Enable/disable KB embedding search
+
+  // Reasoning Configuration (for DeepSeek thinking mode)
+  reasoningEnabled Boolean @default(false) @map("reasoning_enabled")
+
+  // Personality
+  chatbotName     String  @default("Helix Assistant")
+  greetingMessage String  @default("Hello! How can I help you today?")
+  systemPrompt    String?
+
+  // Behavior
+  autoEscalateAfter Int      @default(5)
+  escalateKeywords  String[] @default(["human", "agent", "real person"])
+
+  // Custom FAQs (JSON array)
+  customFaqs Json?
+
+  // Feature flags
+  enabledFeatures Json? // Array of enabled features
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}

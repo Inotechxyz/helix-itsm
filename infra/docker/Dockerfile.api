@@ -1,0 +1,73 @@
+# Build stage
+FROM node:26-alpine AS builder
+
+WORKDIR /app
+
+# Install OpenSSL for Prisma
+RUN apk add --no-cache openssl
+
+# Copy ALL workspace files first (critical for dependency resolution)
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/protected-license/package*.json ./packages/protected-license/
+COPY packages/config/package*.json ./packages/config/
+COPY packages/shared/tsconfig.json ./packages/shared/
+COPY packages/protected-license/tsconfig.json ./packages/protected-license/
+COPY packages/config/tsconfig.base.json ./packages/config/
+
+# Install all workspace dependencies
+RUN npm ci
+
+# Copy source code
+COPY apps/api ./apps/api
+COPY packages/shared ./packages/shared
+COPY packages/protected-license ./packages/protected-license
+COPY packages/config ./packages/config
+COPY prisma ./prisma
+
+# Build shared packages first (required for API build)
+RUN npm run build -w packages/shared
+RUN npm run build -w packages/protected-license
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Build the API application
+RUN npm run build -w apps/api
+
+# Production stage
+FROM node:26-alpine AS production
+
+WORKDIR /app
+
+# Install OpenSSL for Prisma
+RUN apk add --no-cache openssl
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Copy built application and node_modules from builder
+COPY --from=builder /app/apps/api/dist ./dist
+COPY --from=builder /app/apps/api/package*.json ./
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/shared/dist ./node_modules/@helix/shared
+COPY --from=builder /app/packages/protected-license/dist ./node_modules/@inotechxyz/protected-license
+
+# Set ownership
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Start the application
+CMD ["node", "dist/main.js"]

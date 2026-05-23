@@ -1,0 +1,27 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+coverage/
+.vscode/
+.idea/
+*.tgz
+*.swp
+*.swo
+.cache/
+prisma/migrations/
+prisma/*.db
+uploads/
+schema.gql
+nul
+
+# Logs folders
+apps/api/logs/
+apps/worker/logs/
+apps/web/logs/
+apps/api/src/logs/
+apps/worker/src/logs/
+apps/web/src/logs/

@@ -1,0 +1,50 @@
+{
+  "name": "helix-helpdesk",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:worker": "npm run dev -w apps/worker",
+    "build:api": "npm run build -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api",
+    "docker:up": "docker-compose -f infra/docker/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f infra/docker/docker-compose.yml down",
+    "generate:license": "node tools/generate-license.js"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.0",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "utf7": {
+      "semver": ">=7.5.2"
+    },
+    "tar": ">=7.5.11",
+    "minimatch": ">=9.0.7",
+    "glob": ">=11.1.0",
+    "cross-spawn": ">=7.0.5",
+    "brace-expansion": ">=5.0.6",
+    "diff": ">=5.2.2",
+    "ws": ">=8.20.1",
+    "ip-address": ">=10.1.1"
+  }
+}
