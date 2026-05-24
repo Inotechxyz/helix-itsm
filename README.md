@@ -6,6 +6,10 @@ A modern, open-source ITSM (IT Service Management) platform for managing IT serv
 ![Node](https://img.shields.io/badge/node-20%2B-green.svg)
 ![TypeScript](https://img.shields.io/badge/typescript-5.0-blue.svg)
 
+## Demo
+
+[![Watch Demo](https://img.youtube.com/vi/U8EleLNx--E/maxresdefault.jpg)](https://www.youtube.com/watch?v=U8EleLNx--E)
+
 ## Overview
 
 Helix Helpdesk provides a comprehensive solution for IT service management with features like incident tracking, service catalogs, knowledge bases, and change management - all in a multi-tenant architecture supporting multiple organizations.
